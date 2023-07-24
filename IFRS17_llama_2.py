@@ -1,33 +1,22 @@
-from langchain.document_loaders import PyPDFLoader
+from langchain.document_loaders import PyPDFDirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import Chroma
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import LLMChainExtractor
-from langchain.llms import OpenAI
-from langchain.chat_models import ChatOpenAI
 from langchain.chains import RetrievalQA
+from langchain import PromptTemplate
 import os
 from langchain import HuggingFaceHub
-
-
 from dotenv import load_dotenv, find_dotenv
+
 _ = load_dotenv(find_dotenv())
 
 HUGGINGFACEHUB_API_TOKEN = os.environ["HUGGINGFACEHUB_API_TOKEN"]
+# openai.api_key = os.environ["OPENAI_API_KEY"]
 
-loader = PyPDFLoader("IFRS_17/Discount rates for IFRS 17.pdf",
-                     "IFRS_17/IFRS17_BasisforConclusions_May2017.pdf",
-                     "IFRS_17/IFRS17_IllustrativeExamples_May2017.pdf",
-                     "IFRS_17/ifrs-17-incorporating-the-june-2020-amendments.pdf",
-                     "IFRS_17/IFRS-17-Project-Summary.pdf")
+loader = PyPDFDirectoryLoader("IFRS17")
 pages = loader.load()
-
-print(pages[4])
-print(len(pages[4].page_content))
-print(len(pages))
-
-pages = pages[1:300]
 
 r_splitter = RecursiveCharacterTextSplitter(
     chunk_size=3000,
@@ -35,10 +24,6 @@ r_splitter = RecursiveCharacterTextSplitter(
 )
 
 chunks = r_splitter.split_documents(pages)
-
-print(chunks[4])
-print(len(chunks[4].page_content))
-print(len(chunks))
 
 embedding = OpenAIEmbeddings()
 
@@ -48,12 +33,7 @@ vectordb = Chroma.from_documents(
     # persist_directory= zatim staci in memory vectordb?
 )
 
-question = "What are the submodules of natural catastrophe risk sub module?"
-docs = vectordb.similarity_search(question, k = 6)
-print(docs[1])
-print(docs[2])
-
-repo_id = "meta-llama/Llama-2-13b-hf"
+repo_id = "google/flan-t5-base"
 
 llm = HuggingFaceHub(
     repo_id=repo_id, model_kwargs={"temperature": 0}
@@ -61,9 +41,12 @@ llm = HuggingFaceHub(
 
 compressor = LLMChainExtractor.from_llm(llm)
 
+retriever = vectordb.as_retriever(search_type = "mmr")
+retriever.search_kwargs = {'k':10}
+
 compression_retriever = ContextualCompressionRetriever(
     base_compressor = compressor,
-    base_retriever = vectordb.as_retriever()
+    base_retriever = retriever
 )
 
 question = "What are the submodules of natural catastrophe risk sub module?"
@@ -71,16 +54,20 @@ compressed_docs = compression_retriever.get_relevant_documents(question)
 print(compressed_docs[0])
 print(compressed_docs[1])
 
-chat_llm = ChatOpenAI(model_name = "gpt-3.5-turbo",
-                     temperature = 0)
+#
+from langchain import HuggingFacePipeline
+
+chat_llm = HuggingFacePipeline.from_model_id(
+    model_id="meta-llama/Llama-2-7b-chat-hf",
+    task="text-generation",
+    model_kwargs={"temperature": 0},
+)
 
 prompt_template = """/
 Use the following pieces of context to answer the question at the end.
 If you don't know the answer, just say that you don't know, don't try to make up an answer.
-Both the question and context are about Solvency II, which is a very complicated legal topic. 
+Both the question and context are about IFRS17 Standard, which is a very complicated legal topic. 
 You may often need to consider multiple pieces of context together to come up with the final answer.
-Also, the context consists of equations, that are not read correctly. Never use these incorrectly formatted 
-equations to formulate the final answer. Only use the plain legal english text. 
 
 {context}
 
@@ -99,43 +86,38 @@ qa_chain = RetrievalQA.from_chain_type(
     retriever = compression_retriever,
     chain_type_kwargs = chain_type_kwargs
 )
-
-question = "What are the submodules of natural catastrophe risk sub module?"
+question = "What are IFRS17 guidelines on constructing CF discount curve?"
 result = qa_chain({"query": question})
 print(result["result"])
 
-question = "How is the windstorm risk submodule calculated?"
+question = "How should one construct CF discount curve for products with profit sharing?"
 result = qa_chain({"query": question})
 print(result["result"])
 
-question = "How is the capital requirement for health expense risk calculated?"
+question = "What are IFRS17 guidelines on constructing CF discount curve for products without profit sharing?"
 result = qa_chain({"query": question})
 print(result["result"])
 
-question = "How is the capital requirement for SLT health mass lapse risk calculated?"
+question = "What are IFRS17 guidelines on constructing CF discount curve for reinsurance contracts?"
 result = qa_chain({"query": question})
 print(result["result"])
 
-question = "How is the capital requirement for pandemic risk sub-module calculated?"
+question = "Please explain in detail bottom up approach to constructing a CF discount curve."
 result = qa_chain({"query": question})
 print(result["result"])
 
-question = "What criteria need to be met for an investment to be considered qualifying infrastructure investment?"
+question = "Please explain in detail top down approach to constructing a CF discount curve."
 result = qa_chain({"query": question})
 print(result["result"])
 
-question = "How is the capital requirement for spread risk calculated?"
+question = "In the context of creating a CF discount curve, what does risk-free mean?"
 result = qa_chain({"query": question})
 print(result["result"])
 
-question = "What criteria need to be met for data used to calculate undertaking-specific parameters?"
+question = "In the context of creating a CF discount curve, what does credit spread mean?"
 result = qa_chain({"query": question})
 print(result["result"])
 
-question = "What is Minimum Capital Requirement and how is it calculated?"
-result = qa_chain({"query": question})
-print(result["result"])
-
-question = "What are some functions described in the Solvency II legislature and what do they do?"
+question = "In the context of creating a CF discount curve, what does illiquidity premium mean?"
 result = qa_chain({"query": question})
 print(result["result"])
